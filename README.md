@@ -11,6 +11,8 @@ versionadas.
 - T4, equipe da Sophya: Sprints 0, 1, 2 e 3 carregadas.
 - Demais equipes: estrutura preservada para processamento posterior.
 - PDF da devolutiva do T4 gerado a partir da Sprint 3, com historico S0-S3.
+- Dashboard e PDF exibem Survey e dimensoes SPACE em todas as sprints; dados
+  sem respostas aparecem como `n/d`.
 
 ## Deploy no Streamlit Cloud
 

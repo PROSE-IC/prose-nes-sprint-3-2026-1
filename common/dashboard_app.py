@@ -43,6 +43,20 @@ SPACE_PT = {
     "S": "Satisfação e Bem-Estar",
 }
 
+SPACE_ORDER = [
+    SPACE_NAME["W"],
+    SPACE_NAME["P"],
+    SPACE_NAME["C"],
+    SPACE_NAME["E"],
+]
+
+SPACE_HISTORY_LABELS = {
+    SPACE_NAME["W"]: "Bem-estar",
+    SPACE_NAME["P"]: "Performance",
+    SPACE_NAME["C"]: "Comunicação",
+    SPACE_NAME["E"]: "Fluxo",
+}
+
 QUESTION_DIMENSION_RULES = [
     (r"satisfacao|frustracao|desanimo|tensoes|conflitos|motivacao|fatores externos|bem-estar", "SPACE-W (Satisfaction & Well-Being)"),
     (r"cumprimento|cumprir|comprometeu a realizar|qualidade|formacao|engenharia de software|conhecimentos", "SPACE-P (Performance)"),
@@ -112,6 +126,12 @@ def to_float(value: object) -> Optional[float]:
         return float(str(value).strip().replace(",", "."))
     except ValueError:
         return None
+
+
+def score_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "n/d"
+    return f"{float(value):.2f}"
 
 
 def sprint_num(label: str) -> int:
@@ -320,6 +340,20 @@ def build_space_frame(reports: List[Report]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["Equipe", "Dimensão", "Sprint", "Sprint Nº", "Nota", "Artefato"])
 
 
+def build_history_table(reports: List[Report]) -> pd.DataFrame:
+    rows = []
+    for report in sorted(reports, key=lambda item: sprint_num(item.sprint)):
+        row = {
+            "Sprint": report.sprint,
+            "Participação": report.participation or "n/d",
+            "Nota do Survey": score_text(report.overall),
+        }
+        for dimension in SPACE_ORDER:
+            row[SPACE_HISTORY_LABELS[dimension]] = score_text(report.space.get(dimension))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def load_all_team_reports(team_dir: Path) -> List[Report]:
     teams_root = team_dir.parent
     reports: List[Report] = []
@@ -429,15 +463,12 @@ def run_app(team_dir: Path, team_label: str) -> None:
         st.stop()
 
     agg = build_space_frame(reports)
-    if agg.empty:
-        st.error("Os relatos foram encontrados, mas nenhum valor SPACE foi detectado.")
-        st.stop()
     all_reports = load_all_team_reports(team_dir)
     all_agg = build_space_frame(all_reports)
 
     st.sidebar.title("Filtros")
-    sprints = sorted(agg["Sprint"].dropna().unique().tolist(), key=sprint_num)
-    dimensions = sorted(agg["Dimensão"].dropna().unique().tolist())
+    sprints = sorted({report.sprint for report in reports}, key=sprint_num)
+    dimensions = SPACE_ORDER
     sprint_sel = st.sidebar.multiselect("Sprint", sprints, default=sprints)
     dim_sel = st.sidebar.multiselect("Dimensões SPACE", dimensions, default=dimensions)
 
@@ -450,11 +481,18 @@ def run_app(team_dir: Path, team_label: str) -> None:
     st.title(f"NES · SPACE Dashboard · {team_label.upper()}")
     render_space_explanation()
 
+    st.subheader("Histórico completo de notas")
+    st.caption(
+        "Todas as sprints carregadas aparecem abaixo. `n/d` indica que não houve "
+        "respostas ou dados suficientes para calcular a nota."
+    )
+    st.dataframe(build_history_table(reports), use_container_width=True, hide_index=True)
+
     col1, col2, col3 = st.columns(3)
     if df.empty:
-        col1.metric("Média SPACE filtrada", "—")
-        col2.metric("Dimensão destaque", "—")
-        col3.metric("Sprint destaque", "—")
+        col1.metric("Média SPACE filtrada", "n/d")
+        col2.metric("Dimensão destaque", "n/d")
+        col3.metric("Sprint destaque", "n/d")
     else:
         col1.metric("Média SPACE filtrada", f"{df['Nota'].mean():.2f}")
         col2.metric("Dimensão destaque", df.groupby("Dimensão")["Nota"].mean().idxmax())
@@ -479,8 +517,10 @@ def run_app(team_dir: Path, team_label: str) -> None:
             )
         )
         fig_line.update_yaxes(range=[0, 10], title="Nota (0-10)")
-        fig_line.update_xaxes(title="Sprint")
+        fig_line.update_xaxes(title="Sprint", categoryorder="array", categoryarray=sprints)
         st.plotly_chart(fig_line, use_container_width=True)
+    else:
+        st.info("Não há notas SPACE calculadas para o filtro selecionado.")
 
     st.divider()
     st.subheader("Última Sprint - Notas por Artefato")
@@ -511,6 +551,8 @@ def run_app(team_dir: Path, team_label: str) -> None:
         fig_bar.update_yaxes(range=[0, 10], title="Nota")
         fig_bar.update_xaxes(title="Dimensão")
         st.plotly_chart(fig_bar, use_container_width=True)
+    else:
+        st.info("As dimensões selecionadas não possuem notas calculadas.")
 
     render_team_comparison(all_agg, team_label, sprint_sel, dim_sel)
 
@@ -522,7 +564,7 @@ def run_app(team_dir: Path, team_label: str) -> None:
                 "Artefato": report.artifact,
                 "Equipe": report.team or team_label.upper(),
                 "Participação": report.participation or "n/d",
-                "Nota do Survey": report.overall,
+                "Nota do Survey": score_text(report.overall),
             }
             for report in reports
         ]
@@ -536,13 +578,20 @@ def run_app(team_dir: Path, team_label: str) -> None:
     st.markdown(f"### {selected.artifact} — {selected.sprint}")
     left, right = st.columns([2, 1])
     with left:
-        if selected.overall is not None:
-            st.metric("Nota do Survey", f"{selected.overall:.2f}")
+        st.metric("Nota do Survey", score_text(selected.overall))
         if selected.participation:
             st.caption(f"Participação estimada: {selected.participation}")
-        if selected.space:
-            st.write("**SPACE (do relato)**")
-            st.table(pd.Series(selected.space, name="Nota"))
+        st.write("**SPACE (do relato)**")
+        selected_space = pd.DataFrame(
+            [
+                {
+                    "Dimensão": SPACE_HISTORY_LABELS[dimension],
+                    "Nota": score_text(selected.space.get(dimension)),
+                }
+                for dimension in SPACE_ORDER
+            ]
+        )
+        st.table(selected_space)
         if selected.themes:
             st.write("**Temas / Subdimensões**")
             st.table(pd.Series(selected.themes, name="Nota"))

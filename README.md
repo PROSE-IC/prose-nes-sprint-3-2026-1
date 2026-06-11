@@ -48,5 +48,4 @@ auditorias de classificacao devem permanecer fora do repositorio.
 
 ## Relatorio PDF
 
-- [T4 - Sprint 2, com historico S0-S2](pdfs/relatorio_T4_sprint_2.pdf)
 - [T4 - Sprint 3, com historico S0-S3](pdfs/relatorio_T4_sprint_3.pdf)
